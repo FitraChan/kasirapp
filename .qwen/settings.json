@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter *)",
+      "Bash(grep *)",
+      "Read(//var/www/html/kasir_admin/src/**)",
+      "Bash(npm run *)",
+      "Read(//var/www/html/kasir_admin/**)",
+      "Bash(composer *)",
+      "Bash(find *)",
+      "Bash(php *)"
+    ]
+  },
+  "$version": 3
+}

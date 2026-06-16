@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../garmen_react"
+		},
+		{
+			"path": "../../garmen_api"
+		},
+		{
+			"path": "../kasir_new"
+		}
+	],
+	"settings": {}
+}
