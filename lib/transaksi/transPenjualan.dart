@@ -866,8 +866,6 @@ class _TransPenjualanState extends ConsumerState<TransPenjualan> {
         idUser = user['id'];
       });
     } else {
-      // Login();
-
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const Login()),
@@ -4396,8 +4394,6 @@ class _TransPenjualanState extends ConsumerState<TransPenjualan> {
         await localStorage.remove('pencarian');
         await localStorage.remove('stok');
         await localStorage.remove('kategoriDalamContainer');
-
-        // await _logout(localStorage);
 
         Navigator.pushReplacement(
           context,

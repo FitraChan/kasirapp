@@ -414,9 +414,21 @@ CREATE TABLE tb_bayar_hutang_supplier (
       )
     ''');
 
-    await db!.execute('''
+    await db.execute('''
+      CREATE TABLE stok_opname (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nama_karyawan TEXT,
+          nama_rak TEXT,
+          tanggal TEXT,
+          is_sync INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE produk_gudang (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_stok_opname INTEGER DEFAULT NULL,
         kode_item TEXT DEFAULT NULL,
         kode_barcode TEXT DEFAULT NULL,
         nama_item TEXT DEFAULT NULL,
@@ -3458,5 +3470,35 @@ CREATE TABLE tb_bayar_hutang_supplier (
       data,
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  Future<int> insertStokOpname(
+    Map<String, dynamic> data,
+  ) async {
+    final db = await createDatabase();
+
+    return await db!.insert(
+      'stok_opname',
+      data,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getProdukGudangExportByOpname(
+      idStokOpname) async {
+    final db = await createDatabase();
+
+    return await db!.rawQuery('''
+    SELECT
+      pg.*,
+      so.nama_karyawan,
+      so.nama_rak,
+      so.tanggal
+    FROM produk_gudang pg
+    LEFT JOIN stok_opname so
+      ON so.id = pg.id_stok_opname
+    WHERE pg.id_stok_opname = ?
+      AND CAST(pg.stok AS INTEGER) > 0
+    ORDER BY pg.nama_item ASC
+  ''', [idStokOpname]);
   }
 }

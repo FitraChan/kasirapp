@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
+import 'package:kasirapp/screen/logout_helper.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:kasirapp/network_utils/api.dart';
 import 'package:kasirapp/helpers/dbkasir.dart';
@@ -10,7 +11,7 @@ import 'dart:io';
 import 'package:excel/excel.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:csv/csv.dart';
+import 'package:intl/intl.dart';
 
 class BarcodeScanScreen extends StatefulWidget {
   const BarcodeScanScreen({super.key});
@@ -36,9 +37,14 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   @override
   void initState() {
     super.initState();
+
     initSession();
     _canScan = true;
     _loadScannedItems();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showInputOpnameDialog();
+    });
   }
 
   TextEditingController _getController(
@@ -50,6 +56,102 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     }
 
     return _controllers[id]!;
+  }
+
+  String? namaKaryawan;
+  String? namaRak;
+  int? idStokOpname;
+  Future<void> _showInputOpnameDialog() async {
+    final namaKaryawanController = TextEditingController();
+    final namaRakController = TextEditingController();
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            title: const Text('Mulai Stok Opname'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: namaKaryawanController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Karyawan',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: namaRakController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nama Rak',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.inventory_2),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Mulai Scan'),
+                onPressed: () async {
+                  if (namaKaryawanController.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Nama karyawan wajib diisi'),
+                      ),
+                    );
+                    return;
+                  }
+
+                  if (namaRakController.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Nama rak wajib diisi'),
+                      ),
+                    );
+                    return;
+                  }
+
+                  try {
+                    final now = DateTime.now().toString();
+
+                    // Simpan Header Opname
+                    final id = await KasirHelper().insertStokOpname({
+                      'nama_karyawan': namaKaryawanController.text.trim(),
+                      'nama_rak': namaRakController.text.trim(),
+                      'created_at': now,
+                      'is_sync': 0,
+                    });
+
+                    setState(() {
+                      idStokOpname = id;
+                      namaKaryawan = namaKaryawanController.text.trim();
+                      namaRak = namaRakController.text.trim();
+                    });
+
+                    Navigator.of(dialogContext).pop();
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Gagal membuat sesi opname: $e',
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _saveManualStock(
@@ -109,84 +211,193 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     }
   }
 
-  Future<void> exportToCsv() async {
-    try {
-      final filteredItems = _scannedItems.where((item) {
-        final stok = int.tryParse(item['stok'].toString()) ?? 0;
-        return stok > 0;
-      }).toList();
+  // Future<void> exportToCsv() async {
+  //   try {
+  //     final filteredItems = _scannedItems.where((item) {
+  //       final stok = int.tryParse(item['stok'].toString()) ?? 0;
+  //       return stok > 0;
+  //     }).toList();
 
-      List<List<dynamic>> rows = [];
+  //     List<List<dynamic>> rows = [];
 
-      // Header
+  //     // Header
 
-      // Data
-      for (final item in filteredItems) {
-        rows.add([
-          item['kode_item']?.toString() ?? '',
-          item['barcode_item']?.toString() ?? '',
-          item['nama_item']?.toString() ?? '',
-          item['stok']?.toString() ?? '0',
-        ]);
-      }
+  //     // Header CSV
+  //     rows.add([
+  //       'Kode Item',
+  //       'Barcode',
+  //       'Nama Item',
+  //       'Stok',
+  //       'Tanggal Scan',
+  //     ]);
 
-      String csvData = const ListToCsvConverter().convert(rows);
+  //     // Data
+  //     for (final item in filteredItems) {
+  //       rows.add([
+  //         "${item['kode_item'] ?? ''}",
+  //         item['barcode_item']?.toString() ?? '',
+  //         item['nama_item']?.toString() ?? '',
+  //         item['stok']?.toString() ?? '0',
+  //         item['created_at']?.toString() ?? '0',
+  //       ]);
+  //     }
 
-      final dir = await getApplicationDocumentsDirectory();
+  //     String csvData = const ListToCsvConverter().convert(rows);
 
-      final fileName =
-          'stok_opname_${DateTime.now().millisecondsSinceEpoch}.csv';
+  //     final dir = await getApplicationDocumentsDirectory();
 
-      final file = File('${dir.path}/$fileName');
+  //     final fileName =
+  //         'stok_opname_${DateTime.now().millisecondsSinceEpoch}.csv';
 
-      await file.writeAsString(csvData);
+  //     final file = File('${dir.path}/$fileName');
 
-      EasyLoading.showSuccess(
-        '${filteredItems.length} item berhasil diexport',
-      );
+  //     await file.writeAsString(csvData);
 
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'Laporan Stok Opname CSV',
-      );
-    } catch (e) {
-      EasyLoading.showError(e.toString());
-    }
-  }
+  //     EasyLoading.showSuccess(
+  //       '${filteredItems.length} item berhasil diexport',
+  //     );
+
+  //     await Share.shareXFiles(
+  //       [XFile(file.path)],
+  //       text: 'Laporan Stok Opname CSV',
+  //     );
+  //   } catch (e) {
+  //     EasyLoading.showError(e.toString());
+  //   }
+  // }
 
   Future<void> exportToExcel() async {
     try {
+      final data =
+          await KasirHelper().getProdukGudangExportByOpname(idStokOpname);
+
+      if (data.isEmpty) {
+        EasyLoading.showInfo('Tidak ada data yang dapat diexport');
+        return;
+      }
+
+      String namaKaryawan = data.first['nama_karyawan']?.toString() ?? '';
+      String namaRak = data.first['nama_rak']?.toString() ?? '';
+
       var excel = Excel.createExcel();
 
-      // Ambil nama sheet default
+      // Sheet default
       final defaultSheet = excel.getDefaultSheet();
 
-      // Buat sheet yang akan digunakan
-      Sheet sheet = excel['Stok Opname'];
+      // Buat sheet baru
+      final Sheet sheet = excel['Stok Opname'];
 
-      // Hapus sheet default agar tidak ada Sheet1 kosong
+      // Hapus Sheet1
       if (defaultSheet != null && defaultSheet != 'Stok Opname') {
         excel.delete(defaultSheet);
       }
 
-      // Header
+      // Informasi Header
+      sheet.cell(CellIndex.indexByString("A1")).value =
+          TextCellValue("Nama Karyawan");
 
-      // Filter stok > 0
-      final filteredItems = _scannedItems.where((item) {
-        final stok = int.tryParse(item['stok'].toString()) ?? 0;
-        return stok > 0;
-      }).toList();
+      sheet.cell(CellIndex.indexByString("B1")).value =
+          TextCellValue(namaKaryawan);
 
-      // Data
-      for (final item in filteredItems) {
-        sheet.appendRow([
-          TextCellValue(item['kode_item']?.toString() ?? ''),
-          TextCellValue(item['barcode_item']?.toString() ?? ''),
-          TextCellValue(item['nama_item']?.toString() ?? ''),
-          IntCellValue(
-            int.tryParse(item['stok'].toString()) ?? 0,
-          ),
-        ]);
+      sheet.cell(CellIndex.indexByString("A2")).value =
+          TextCellValue("Nama Rak");
+
+      sheet.cell(CellIndex.indexByString("B2")).value = TextCellValue(namaRak);
+
+      // Header Tabel (baris 4)
+      sheet.cell(CellIndex.indexByString("A4")).value = TextCellValue("No");
+
+      sheet.cell(CellIndex.indexByString("B4")).value =
+          TextCellValue("Kode Item");
+
+      sheet.cell(CellIndex.indexByString("C4")).value =
+          TextCellValue("Barcode");
+
+      sheet.cell(CellIndex.indexByString("D4")).value =
+          TextCellValue("Nama Item");
+
+      sheet.cell(CellIndex.indexByString("E4")).value = TextCellValue("Stok");
+
+      sheet.cell(CellIndex.indexByString("F4")).value =
+          TextCellValue("Tanggal Scan");
+
+      // Data mulai dari baris 5
+      int rowIndex = 4;
+
+      for (int i = 0; i < data.length; i++) {
+        final item = data[i];
+
+        sheet
+            .cell(
+              CellIndex.indexByColumnRow(
+                columnIndex: 0,
+                rowIndex: rowIndex,
+              ),
+            )
+            .value = IntCellValue(i + 1);
+
+        sheet
+            .cell(
+              CellIndex.indexByColumnRow(
+                columnIndex: 1,
+                rowIndex: rowIndex,
+              ),
+            )
+            .value = TextCellValue(
+          item['kode_item']?.toString() ?? '',
+        );
+
+        sheet
+            .cell(
+              CellIndex.indexByColumnRow(
+                columnIndex: 2,
+                rowIndex: rowIndex,
+              ),
+            )
+            .value = TextCellValue(
+          item['kode_barcode']?.toString() ?? '',
+        );
+
+        sheet
+            .cell(
+              CellIndex.indexByColumnRow(
+                columnIndex: 3,
+                rowIndex: rowIndex,
+              ),
+            )
+            .value = TextCellValue(
+          item['nama_item']?.toString() ?? '',
+        );
+
+        sheet
+            .cell(
+              CellIndex.indexByColumnRow(
+                columnIndex: 4,
+                rowIndex: rowIndex,
+              ),
+            )
+            .value = IntCellValue(
+          int.tryParse(item['stok'].toString()) ?? 0,
+        );
+
+        sheet
+            .cell(
+              CellIndex.indexByColumnRow(
+                columnIndex: 5,
+                rowIndex: rowIndex,
+              ),
+            )
+            .value = TextCellValue(
+          item['created_at'] != null
+              ? DateFormat('dd-MM-yyyy HH:mm:ss').format(
+                  DateTime.parse(
+                    item['created_at'].toString(),
+                  ),
+                )
+              : '',
+        );
+
+        rowIndex++;
       }
 
       final bytes = excel.encode();
@@ -195,18 +406,24 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
         EasyLoading.showError('Gagal membuat file Excel');
         return;
       }
+      final tanggal = DateFormat('dd-MM-yyyy').format(DateTime.now());
+      String safeNamaKaryawan =
+          namaKaryawan.replaceAll(RegExp(r'[^\w\s-]'), '').replaceAll(' ', '_');
+
+      String safeNamaRak =
+          namaRak.replaceAll(RegExp(r'[^\w\s-]'), '').replaceAll(' ', '_');
 
       final dir = await getApplicationDocumentsDirectory();
 
       final fileName =
-          'stok_opname_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+          'stok_opname_${safeNamaKaryawan}_${safeNamaRak}_$tanggal.xlsx';
 
       final file = File('${dir.path}/$fileName');
 
       await file.writeAsBytes(bytes, flush: true);
 
       EasyLoading.showSuccess(
-        '${filteredItems.length} item berhasil diexport',
+        '${data.length} item berhasil diexport',
       );
 
       await Share.shareXFiles(
@@ -220,6 +437,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   Future<void> _loadScannedItems() async {
     final items = await KasirHelper().getAllProdukGudang();
+
     // Ensure we store a mutable copy — some DB helpers return read-only lists/maps.
     final mutableItems = List<Map<String, dynamic>>.from(items);
     if (mounted) {
@@ -234,18 +452,26 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     return _barcode?.displayValue;
   }
 
+  var user;
   var idUser;
   Future<void> initSession() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    int? sessionId = prefs.getInt('session_id');
 
-    var user = jsonDecode(prefs.getString('user') ?? '');
+    final userString = prefs.getString('user');
+    final sessionId = prefs.getInt('session_id');
+
+    if (userString == null || userString.isEmpty) {
+      await LogoutHelper.logout();
+      return;
+    }
+
+    user = jsonDecode(userString);
+
     setState(() {
-      idUser = user['id'] as int?;
+      idUser = user['id'];
     });
 
     if (sessionId == null) {
-      // belum ada → buat baru
       await getSession();
     } else {
       print("Pakai session lama: $sessionId");
@@ -326,6 +552,10 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   void _saveToSqflite(String barcodeValue) async {
     try {
+      if (user == null) {
+        await LogoutHelper.logout();
+        return;
+      }
       final now = DateTime.now().toString();
 
       final existingItem = await KasirHelper().getProdukByBarcode(barcodeValue);
@@ -341,6 +571,8 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
             'stok': newStock.toString(),
             'waktu_scan': now,
             'updated_at': now,
+            'created_at': now,
+            'id_stok_opname': idStokOpname,
             'is_sync': 0,
           },
         );
@@ -358,6 +590,9 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
               updatedItem['stok'] = newStock.toString();
               updatedItem['waktu_scan'] = now;
               updatedItem['updated_at'] = now;
+              updatedItem['created_at'] = now;
+              updatedItem['id_stok_opname'] = idStokOpname;
+
               updatedItem['is_sync'] = 0;
 
               _scannedItems[index] = updatedItem;
@@ -374,6 +609,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
           'kode_barcode': barcodeValue,
           'nama_item': '',
           'stok': '1',
+          'id_stok_opname': idStokOpname,
           'waktu_scan': now,
           'created_at': now,
           'updated_at': now,
@@ -388,6 +624,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
               'kode_barcode': barcodeValue,
               'nama_item': '',
               'stok': '1',
+              'id_stok_opname': idStokOpname,
               'waktu_scan': now,
               'created_at': now,
               'updated_at': now,
@@ -408,6 +645,97 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
         );
       }
     }
+  }
+
+  Future<void> _showAddItemDialog() async {
+    final kodeItemController = TextEditingController();
+    final namaItemController = TextEditingController();
+    final stokController = TextEditingController(text: '1');
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Tambah Item'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: kodeItemController,
+                decoration: const InputDecoration(
+                  labelText: 'Kode Item',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: namaItemController,
+                decoration: const InputDecoration(
+                  labelText: 'Nama Item',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: stokController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Stok',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                final now = DateTime.now().toString();
+
+                await KasirHelper().insertProdukGudang({
+                  'kode_item': kodeItemController.text,
+                  'kode_barcode': kodeItemController.text,
+                  'nama_item': namaItemController.text,
+                  'stok': stokController.text,
+                  'waktu_scan': now,
+                  'created_at': now,
+                  'updated_at': now,
+                  'is_sync': 0,
+                });
+
+                await _loadScannedItems();
+
+                if (mounted) {
+                  Navigator.pop(context);
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Item berhasil ditambahkan'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _syncToMySQL() async {
@@ -464,19 +792,71 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     }
   }
 
-  void sendToMysql(barcode) async {
-    // This method is now deprecated in favor of _syncToMySQL
-    // Kept for backward compatibility if needed
-  }
-
   Future<void> _deleteItem(int id) async {
+    final passwordController = TextEditingController();
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Konfirmasi Hapus'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Masukkan password untuk menghapus item.',
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                // obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (passwordController.text == 'aiboo') {
+                  Navigator.pop(context, true);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Password salah'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
     try {
       await KasirHelper().deleteProdukGudang(id);
+
       await _loadScannedItems();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Item deleted successfully'),
+            content: Text('Item berhasil dihapus'),
             backgroundColor: Colors.green,
           ),
         );
@@ -668,19 +1048,19 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                       label: const Text('Excel'),
                     ),
                   ),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: exportToCsv,
-                      icon: const Icon(Icons.file_download),
-                      label: const Text('Csv'),
-                    ),
-                  ),
+                  // Expanded(
+                  //   child: ElevatedButton.icon(
+                  //     onPressed: exportToCsv,
+                  //     icon: const Icon(Icons.file_download),
+                  //     label: const Text('Csv'),
+                  //   ),
+                  // ),
                   const SizedBox(width: 10),
                   IconButton(
-                    icon: const Icon(Icons.delete_sweep),
-                    onPressed: _clearAllItems,
-                    color: Colors.red,
-                    tooltip: 'Clear All',
+                    icon: const Icon(Icons.add),
+                    onPressed: _showAddItemDialog,
+                    color: Colors.black,
+                    tooltip: 'Tambah Item',
                   ),
                 ],
               ),

@@ -5,6 +5,10 @@ import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:kasirapp/helpers/dbkasir.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
+import 'package:excel/excel.dart';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter_easyloading/flutter_easyloading.dart';
 
 class CsvImportScreen extends StatefulWidget {
   const CsvImportScreen({super.key});
@@ -38,174 +42,311 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
     });
   }
 
-  Future<void> _importCsv() async {
+  Future<void> importExcel() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['csv'],
+        allowedExtensions: ['xlsx'],
       );
 
-      if (result != null) {
-        EasyLoading.show(status: 'Importing CSV...');
+      if (result == null) {
+        return;
+      }
 
-        final file = File(result.files.single.path!);
-        final csvString = await file.readAsString();
+      EasyLoading.show(status: 'Importing Excel...');
 
-        // Debug: check file content
-        print('=== CSV DEBUG INFO ===');
-        print('File size: ${csvString.length} characters');
-        print(
-            'First 500 chars: ${csvString.substring(0, csvString.length > 500 ? 500 : csvString.length)}');
-        print('Contains newlines (\\n): ${csvString.contains('\n')}');
-        print('Contains \\r\\n: ${csvString.contains('\r\n')}');
-        print('Line count (manual split): ${csvString.split('\n').length}');
-        print('=======================');
+      final file = File(result.files.single.path!);
 
-        // Try manual split first to verify
-        final manualLines = csvString
-            .split('\n')
-            .where((line) => line.trim().isNotEmpty)
-            .toList();
-        print('Manual line count (non-empty): ${manualLines.length}');
-        if (manualLines.isNotEmpty) {
-          print('First manual line: ${manualLines[0]}');
-        }
-        if (manualLines.length > 1) {
-          print('Second manual line: ${manualLines[1]}');
-        }
+      final bytes = file.readAsBytesSync();
 
-        // Parse with CsvToListConverter
-        final csvConverter = const CsvToListConverter(
-          fieldDelimiter: ',',
-          shouldParseNumbers: false,
-        );
-        final List<List<dynamic>> csvData = csvConverter.convert(csvString);
+      final excel = Excel.decodeBytes(bytes);
 
-        if (csvData.isEmpty) {
-          EasyLoading.showError('CSV file is empty');
-          return;
+      if (excel.tables.isEmpty) {
+        EasyLoading.showError('Sheet tidak ditemukan');
+        return;
+      }
+
+      final sheetName = excel.tables.keys.first;
+
+      final Sheet sheet = excel.tables[sheetName]!;
+
+      int importedCount = 0;
+      int skippedCount = 0;
+
+      final now = DateTime.now().toString();
+
+      print('Sheet: $sheetName');
+      print('Total Rows: ${sheet.rows.length}');
+
+      for (int i = 4; i < sheet.rows.length; i++) {
+        final row = sheet.rows[i];
+
+        if (row.isEmpty) {
+          skippedCount++;
+          continue;
         }
 
-        print('CSV Total rows from parser: ${csvData.length}');
-        if (csvData.isNotEmpty) {
-          print('First row parsed: ${csvData[0]}');
-        }
-        if (csvData.length > 1) {
-          print('Second row parsed: ${csvData[1]}');
+        // Skip baris kosong
+        if (row.every((cell) =>
+            cell == null ||
+            cell.value == null ||
+            cell.value.toString().trim().isEmpty)) {
+          skippedCount++;
+          continue;
         }
 
-        // If CSV parser only found 1 row but file has many lines, use manual parsing
-        if (csvData.length == 1 && manualLines.length > 1) {
+        // Skip header
+        if (i == 0) {
+          final firstCell = row[0]?.value.toString().toLowerCase().trim() ?? '';
+
+          if (firstCell.contains('kode') ||
+              firstCell.contains('barcode') ||
+              firstCell.contains('nama')) {
+            print('Header ditemukan, dilewati');
+            skippedCount++;
+            continue;
+          }
+        }
+
+        String kodeItem =
+            row.length > 1 ? row[1]?.value.toString().trim() ?? '' : '';
+
+        String kodeBarcode =
+            row.length > 2 ? row[2]?.value.toString().trim() ?? '' : '';
+
+        String namaItem =
+            row.length > 3 ? row[3]?.value.toString().trim() ?? '' : '';
+
+        String stok =
+            row.length > 4 ? row[4]?.value.toString().trim() ?? '0' : '0';
+
+        String tanggal =
+            row.length > 5 ? row[5]?.value.toString().trim() ?? '' : '';
+
+        if (kodeItem.isEmpty) {
+          skippedCount++;
+          continue;
+        }
+
+        if (kodeBarcode.isEmpty) {
+          kodeBarcode = kodeItem;
+        }
+
+        final data = {
+          'kode_item': kodeItem,
+          'kode_barcode': kodeBarcode,
+          'nama_item': namaItem,
+          'stok': stok.isEmpty ? '0' : stok,
+          'waktu_scan': tanggal,
+          'created_at': tanggal,
+          'updated_at': now,
+          'is_sync': 0,
+        };
+
+        try {
+          await KasirHelper().createProdukGudang(data);
+
+          importedCount++;
+
           print(
-              '⚠️ CSV parser found only 1 row, switching to manual parsing...');
-        }
-
-        int importedCount = 0;
-        int skippedCount = 0;
-        final now = DateTime.now().toString();
-
-        // Use manualLines if CSV parser failed
-        List<List<dynamic>> dataToProcess;
-        if (csvData.length == 1 && manualLines.length > 1) {
-          // Manual parsing fallback
-          dataToProcess = manualLines.map((line) {
-            return line.split(',').map((e) => e.trim()).toList();
-          }).toList();
-          print('Using manual parsing: ${dataToProcess.length} rows');
-        } else {
-          dataToProcess = csvData;
-        }
-
-        print('Processing ${dataToProcess.length} rows...');
-
-        for (int i = 0; i < dataToProcess.length; i++) {
-          final row = dataToProcess[i];
-
-          // Skip empty rows
-          if (row.isEmpty ||
-              row.every((cell) => cell.toString().trim().isEmpty)) {
-            skippedCount++;
-            continue;
-          }
-
-          String? kodeItem, kodeBarcode, namaItem, stok;
-
-          // Parse CSV columns based on your actual format: kode_item,,nama_item
-          // Column 0: kode_item (ID)
-          // Column 1: (empty - was for barcode)
-          // Column 2: nama_item (product name)
-          if (row.length > 0) kodeItem = row[0].toString().trim();
-          if (row.length > 1) kodeBarcode = row[1].toString().trim();
-          if (row.length > 2) namaItem = row[2].toString().trim();
-          if (row.length > 3) stok = row[3].toString().trim();
-
-          // Skip header row detection (if first row contains text like "kode", "nama", etc)
-          if (i == 0) {
-            if (kodeItem != null &&
-                (kodeItem.toLowerCase().contains('kode') ||
-                    kodeItem.toLowerCase().contains('id') ||
-                    kodeItem.toLowerCase().contains('no') ||
-                    kodeItem.toLowerCase().contains('nama'))) {
-              print('Skipping header row');
-              skippedCount++;
-              continue;
-            }
-          }
-
-          // Skip if kode_item is empty
-          if (kodeItem == null || kodeItem.isEmpty) {
-            skippedCount++;
-            print('Skipped row $i: empty kode_item');
-            continue;
-          }
-
-          // If kode_barcode is empty, use kode_item as barcode
-          String finalKodeBarcode;
-          if (kodeBarcode == null || kodeBarcode.isEmpty) {
-            finalKodeBarcode = kodeItem;
-          } else {
-            finalKodeBarcode = kodeBarcode;
-          }
-
-          // Import ALL items - no duplicate checking
-          final data = {
-            'kode_item': kodeItem,
-            'kode_barcode': finalKodeBarcode,
-            'nama_item': namaItem ?? '-',
-            'stok': (stok ?? '0').isEmpty ? '0' : stok,
-            'waktu_scan': now,
-            'created_at': now,
-            'updated_at': now,
-            'is_sync': 0,
-          };
-
-          try {
-            await KasirHelper().createProdukGudang(data);
-            importedCount++;
-            print(
-                'Imported #$importedCount: kode_item=$kodeItem, barcode=$finalKodeBarcode, nama=$namaItem');
-            // Print first few items for debugging
-            if (importedCount <= 5) {}
-          } catch (e) {
-            print('Error inserting row $i: $e');
-            skippedCount++;
-          }
-        }
-
-        await _loadImportedItems();
-
-        if (importedCount > 0) {
-          EasyLoading.showSuccess(
-              '$importedCount item(s) imported, $skippedCount skipped');
-        } else {
-          EasyLoading.showError('No items imported. Check CSV format.');
+            'Imported: $kodeItem | $kodeBarcode | $namaItem | $stok',
+          );
+        } catch (e) {
+          print('Error row $i: $e');
+          skippedCount++;
         }
       }
+
+      await _loadImportedItems();
+
+      EasyLoading.dismiss();
+
+      if (importedCount > 0) {
+        EasyLoading.showSuccess(
+          '$importedCount item berhasil diimport\n$skippedCount dilewati',
+        );
+      } else {
+        EasyLoading.showError('Tidak ada data yang berhasil diimport');
+      }
     } catch (e) {
-      print('CSV Import Error: $e');
-      EasyLoading.showError('Error importing CSV: $e');
+      print('Import Excel Error: $e');
+
+      EasyLoading.dismiss();
+
+      EasyLoading.showError(
+        'Gagal import Excel\n$e',
+      );
     }
   }
+
+  // Future<void> _importCsv() async {
+  //   try {
+  //     FilePickerResult? result = await FilePicker.platform.pickFiles(
+  //       type: FileType.custom,
+  //       allowedExtensions: ['csv'],
+  //     );
+
+  //     if (result != null) {
+  //       EasyLoading.show(status: 'Importing CSV...');
+
+  //       final file = File(result.files.single.path!);
+  //       final csvString = await file.readAsString();
+
+  //       // Debug: check file content
+  //       print('=== CSV DEBUG INFO ===');
+  //       print('File size: ${csvString.length} characters');
+  //       print(
+  //           'First 500 chars: ${csvString.substring(0, csvString.length > 500 ? 500 : csvString.length)}');
+  //       print('Contains newlines (\\n): ${csvString.contains('\n')}');
+  //       print('Contains \\r\\n: ${csvString.contains('\r\n')}');
+  //       print('Line count (manual split): ${csvString.split('\n').length}');
+  //       print('=======================');
+
+  //       // Try manual split first to verify
+  //       final manualLines = csvString
+  //           .split('\n')
+  //           .where((line) => line.trim().isNotEmpty)
+  //           .toList();
+  //       print('Manual line count (non-empty): ${manualLines.length}');
+  //       if (manualLines.isNotEmpty) {
+  //         print('First manual line: ${manualLines[0]}');
+  //       }
+  //       if (manualLines.length > 1) {
+  //         print('Second manual line: ${manualLines[1]}');
+  //       }
+
+  //       // Parse with CsvToListConverter
+  //       final csvConverter = const CsvToListConverter(
+  //         fieldDelimiter: ',',
+  //         shouldParseNumbers: false,
+  //       );
+  //       final List<List<dynamic>> csvData = csvConverter.convert(csvString);
+
+  //       if (csvData.isEmpty) {
+  //         EasyLoading.showError('CSV file is empty');
+  //         return;
+  //       }
+
+  //       print('CSV Total rows from parser: ${csvData.length}');
+  //       if (csvData.isNotEmpty) {
+  //         print('First row parsed: ${csvData[0]}');
+  //       }
+  //       if (csvData.length > 1) {
+  //         print('Second row parsed: ${csvData[1]}');
+  //       }
+
+  //       // If CSV parser only found 1 row but file has many lines, use manual parsing
+  //       if (csvData.length == 1 && manualLines.length > 1) {
+  //         print(
+  //             '⚠️ CSV parser found only 1 row, switching to manual parsing...');
+  //       }
+
+  //       int importedCount = 0;
+  //       int skippedCount = 0;
+  //       final now = DateTime.now().toString();
+
+  //       // Use manualLines if CSV parser failed
+  //       List<List<dynamic>> dataToProcess;
+  //       if (csvData.length == 1 && manualLines.length > 1) {
+  //         // Manual parsing fallback
+  //         dataToProcess = manualLines.map((line) {
+  //           return line.split(',').map((e) => e.trim()).toList();
+  //         }).toList();
+  //         print('Using manual parsing: ${dataToProcess.length} rows');
+  //       } else {
+  //         dataToProcess = csvData;
+  //       }
+
+  //       print('Processing ${dataToProcess.length} rows...');
+
+  //       for (int i = 0; i < dataToProcess.length; i++) {
+  //         final row = dataToProcess[i];
+
+  //         // Skip empty rows
+  //         if (row.isEmpty ||
+  //             row.every((cell) => cell.toString().trim().isEmpty)) {
+  //           skippedCount++;
+  //           continue;
+  //         }
+
+  //         String? kodeItem, kodeBarcode, namaItem, stok;
+
+  //         // Parse CSV columns based on your actual format: kode_item,,nama_item
+  //         // Column 0: kode_item (ID)
+  //         // Column 1: (empty - was for barcode)
+  //         // Column 2: nama_item (product name)
+  //         if (row.length > 0) kodeItem = row[0].toString().trim();
+  //         if (row.length > 1) kodeBarcode = row[1].toString().trim();
+  //         if (row.length > 2) namaItem = row[2].toString().trim();
+  //         if (row.length > 3) stok = row[3].toString().trim();
+
+  //         // Skip header row detection (if first row contains text like "kode", "nama", etc)
+  //         if (i == 0) {
+  //           if (kodeItem != null &&
+  //               (kodeItem.toLowerCase().contains('kode') ||
+  //                   kodeItem.toLowerCase().contains('id') ||
+  //                   kodeItem.toLowerCase().contains('no') ||
+  //                   kodeItem.toLowerCase().contains('nama'))) {
+  //             print('Skipping header row');
+  //             skippedCount++;
+  //             continue;
+  //           }
+  //         }
+
+  //         // Skip if kode_item is empty
+  //         if (kodeItem == null || kodeItem.isEmpty) {
+  //           skippedCount++;
+  //           print('Skipped row $i: empty kode_item');
+  //           continue;
+  //         }
+
+  //         // If kode_barcode is empty, use kode_item as barcode
+  //         String finalKodeBarcode;
+  //         if (kodeBarcode == null || kodeBarcode.isEmpty) {
+  //           finalKodeBarcode = kodeItem;
+  //         } else {
+  //           finalKodeBarcode = kodeBarcode;
+  //         }
+
+  //         // Import ALL items - no duplicate checking
+  //         final data = {
+  //           'kode_item': kodeItem,
+  //           'kode_barcode': finalKodeBarcode,
+  //           'nama_item': namaItem ?? '-',
+  //           'stok': (stok ?? '0').isEmpty ? '0' : stok,
+  //           'waktu_scan': now,
+  //           'created_at': now,
+  //           'updated_at': now,
+  //           'is_sync': 0,
+  //         };
+
+  //         try {
+  //           await KasirHelper().createProdukGudang(data);
+  //           importedCount++;
+  //           print(
+  //               'Imported #$importedCount: kode_item=$kodeItem, barcode=$finalKodeBarcode, nama=$namaItem');
+  //           // Print first few items for debugging
+  //           if (importedCount <= 5) {}
+  //         } catch (e) {
+  //           print('Error inserting row $i: $e');
+  //           skippedCount++;
+  //         }
+  //       }
+
+  //       await _loadImportedItems();
+
+  //       if (importedCount > 0) {
+  //         EasyLoading.showSuccess(
+  //             '$importedCount item(s) imported, $skippedCount skipped');
+  //       } else {
+  //         EasyLoading.showError('No items imported. Check CSV format.');
+  //       }
+  //     }
+  //   } catch (e) {
+  //     print('CSV Import Error: $e');
+  //     EasyLoading.showError('Error importing CSV: $e');
+  //   }
+  // }
 
   Future<void> _syncToMySQL() async {
     try {
@@ -241,39 +382,39 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
     }
   }
 
-  Future<void> _clearAllItems() async {
-    try {
-      bool confirm = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('Confirm'),
-              content: const Text(
-                  'Are you sure you want to clear all items?\nThis cannot be undone!'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child:
-                      const Text('Clear', style: TextStyle(color: Colors.red)),
-                ),
-              ],
-            ),
-          ) ??
-          false;
+  // Future<void> _clearAllItems() async {
+  //   try {
+  //     bool confirm = await showDialog<bool>(
+  //           context: context,
+  //           builder: (context) => AlertDialog(
+  //             title: const Text('Confirm'),
+  //             content: const Text(
+  //                 'Are you sure you want to clear all items?\nThis cannot be undone!'),
+  //             actions: [
+  //               TextButton(
+  //                 onPressed: () => Navigator.pop(context, false),
+  //                 child: const Text('Cancel'),
+  //               ),
+  //               TextButton(
+  //                 onPressed: () => Navigator.pop(context, true),
+  //                 child:
+  //                     const Text('Clear', style: TextStyle(color: Colors.red)),
+  //               ),
+  //             ],
+  //           ),
+  //         ) ??
+  //         false;
 
-      if (confirm) {
-        EasyLoading.show(status: 'Clearing...');
-        await KasirHelper().clearAllProdukGudang();
-        await _loadImportedItems();
-        EasyLoading.showSuccess('All items cleared!');
-      }
-    } catch (e) {
-      EasyLoading.showError('Error clearing: $e');
-    }
-  }
+  //     if (confirm) {
+  //       EasyLoading.show(status: 'Clearing...');
+  //       await KasirHelper().clearAllProdukGudang();
+  //       await _loadImportedItems();
+  //       EasyLoading.showSuccess('All items cleared!');
+  //     }
+  //   } catch (e) {
+  //     EasyLoading.showError('Error clearing: $e');
+  //   }
+  // }
 
   Future<void> _importAndReplace() async {
     try {
@@ -305,7 +446,9 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
         await _loadImportedItems();
 
         // Then import
-        await _importCsv();
+        //await _importCsv();
+
+        await importExcel();
       }
     } catch (e) {
       EasyLoading.showError('Error: $e');
@@ -371,7 +514,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
                     children: [
                       Expanded(
                         child: ElevatedButton.icon(
-                          onPressed: _importCsv,
+                          onPressed: importExcel,
                           icon: const Icon(Icons.file_upload),
                           label: const Text('Import CSV'),
                           style: ElevatedButton.styleFrom(
@@ -411,14 +554,14 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      IconButton(
-                        icon: const Icon(Icons.delete_sweep),
-                        onPressed: _clearAllItems,
-                        color: Colors.red,
-                        tooltip: 'Clear All',
-                        iconSize: 30,
-                      ),
+                      // const SizedBox(width: 10),
+                      // IconButton(
+                      //   icon: const Icon(Icons.delete_sweep),
+                      //   onPressed: _clearAllItems,
+                      //   color: Colors.red,
+                      //   tooltip: 'Clear All',
+                      //   iconSize: 30,
+                      // ),
                     ],
                   ),
                 ],
@@ -465,7 +608,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
                 decoration: BoxDecoration(
                   color: Colors.blue[50],
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.blue[200]!),
+                  // border: Border.all(color: Colors.blue[200]!),
                 ),
                 child: Row(
                   children: [
