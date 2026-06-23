@@ -449,12 +449,32 @@ CREATE TABLE tb_bayar_hutang_supplier (
     //define the path to the database
     String path = join(await getDatabasesPath(), 'kasir.db');
     print(path);
-    db = await openDatabase(path, version: 1, onCreate: _createDb,
+    db = await openDatabase(path, version: 2, onCreate: _createDb,
         onUpgrade: (Database db, int oldV, int newV) async {
-      // db.execute("DROP TABLE IF EXISTS tb_kategori");
-      // db.execute("DROP TABLE IF EXISTS tb_produk");
-      //  db.execute("DROP TABLE IF EXISTS tb_transaksi_pembelian");
-      // db.execute("DROP TABLE IF EXISTS tb_detail_transaksi_pembelian");
+      if (oldV < 2) {
+        await db.execute('''
+      CREATE TABLE IF NOT EXISTS stok_opname (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nama_karyawan TEXT,
+          nama_rak TEXT,
+          tanggal TEXT,
+          is_sync INTEGER DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    ''');
+
+        var columns = await db.rawQuery("PRAGMA table_info(produk_gudang)");
+
+        bool exists = columns.any(
+          (col) => col['name'] == 'id_stok_opname',
+        );
+
+        if (!exists) {
+          await db.execute(
+            "ALTER TABLE produk_gudang ADD COLUMN id_stok_opname INTEGER DEFAULT NULL",
+          );
+        }
+      }
     });
     return db;
   }
@@ -3294,10 +3314,24 @@ CREATE TABLE tb_bayar_hutang_supplier (
     return db!.insert('produk_gudang', data);
   }
 
-  Future<List<Map<String, dynamic>>> getAllProdukGudang() async {
+  Future<List<Map<String, dynamic>>> getAllProdukGudang(idStokOpname) async {
     Database? db = await createDatabase();
 
-    return db!.query('produk_gudang', orderBy: 'updated_at DESC');
+    return await db!.query(
+      'produk_gudang',
+      where: 'id_stok_opname = ?',
+      whereArgs: [idStokOpname],
+      orderBy: 'updated_at DESC',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getProdukGudang() async {
+    Database? db = await createDatabase();
+
+    return await db!.query(
+      'produk_gudang',
+      orderBy: 'updated_at DESC',
+    );
   }
 
   Future<Map<String, dynamic>?> getProdukByBarcode(

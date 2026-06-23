@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
+import 'package:kasirapp/screen/home.dart';
 import 'package:kasirapp/screen/logout_helper.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:kasirapp/network_utils/api.dart';
@@ -40,11 +41,12 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
     initSession();
     _canScan = true;
-    _loadScannedItems();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showInputOpnameDialog();
     });
+
+    //_loadScannedItems();
   }
 
   TextEditingController _getController(
@@ -52,7 +54,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     String stok,
   ) {
     if (!_controllers.containsKey(id)) {
-      _controllers[id] = TextEditingController(text: stok);
+      _controllers[id] = TextEditingController();
     }
 
     return _controllers[id]!;
@@ -135,6 +137,8 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                       namaRak = namaRakController.text.trim();
                     });
 
+                    await _loadScannedItems();
+
                     Navigator.of(dialogContext).pop();
                   } catch (e) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -184,13 +188,16 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
       );
 
       setState(() {
-        _scannedItems[index]['stok'] = totalStock.toString();
+        final item = Map<String, dynamic>.from(
+          _scannedItems[index],
+        );
 
-        _scannedItems[index]['updated_at'] = now;
+        item['stok'] = totalStock.toString();
+        item['updated_at'] = now;
+        item['is_sync'] = 0;
 
-        _scannedItems[index]['is_sync'] = 0;
+        _scannedItems[index] = item;
 
-        // reset input setelah save
         _controllers[id]?.clear();
       });
 
@@ -436,7 +443,9 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   }
 
   Future<void> _loadScannedItems() async {
-    final items = await KasirHelper().getAllProdukGudang();
+    final items = await KasirHelper().getAllProdukGudang(idStokOpname);
+
+    // final items = await KasirHelper().getProdukGudang();
 
     // Ensure we store a mutable copy — some DB helpers return read-only lists/maps.
     final mutableItems = List<Map<String, dynamic>>.from(items);
@@ -601,6 +610,8 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
               _scannedItems.insert(0, movedItem);
             }
           });
+
+          await _loadScannedItems();
         }
       } else {
         // INSERT DATA BARU
@@ -631,6 +642,8 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
               'is_sync': 0,
             });
           });
+
+          await _loadScannedItems();
         }
       }
     } catch (e) {
@@ -702,6 +715,7 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
                   'kode_barcode': kodeItemController.text,
                   'nama_item': namaItemController.text,
                   'stok': stokController.text,
+                  'id_stok_opname': idStokOpname,
                   'waktu_scan': now,
                   'created_at': now,
                   'updated_at': now,
@@ -991,283 +1005,340 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Scan Barcode'),
-        backgroundColor: Colors.blue,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.switch_camera),
-            onPressed: _switchCamera,
-            tooltip: 'Switch Camera',
-          ),
-          IconButton(
-            icon: const Icon(Icons.flash_on),
-            onPressed: _toggleTorch,
-            tooltip: 'Toggle Flash',
-          ),
-        ],
-      ),
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xffFF5F6D), Color(0xffFFC371)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Column(
-          children: [
-            // Action buttons row
-            Padding(
-              padding: const EdgeInsets.all(10.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _syncToMySQL,
-                      icon: const Icon(Icons.save),
-                      label: const Text('To Server'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+    return WillPopScope(
+      onWillPop: () async {
+        final shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: const Text('Konfirmasi'),
+              content: const Text(
+                'Apakah mau keluar dari scan barang?\nPastikan sudah export hasil scan barang.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Batal'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Keluar'),
+                ),
+              ],
+            );
+          },
+        );
+
+        return shouldExit ?? false;
+      },
+      child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Scan Barcode'),
+            backgroundColor: Colors.blue,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () async {
+                final exit = await showDialog<bool>(
+                  context: context,
+                  builder: (context) {
+                    return AlertDialog(
+                      title: const Text('Konfirmasi'),
+                      content: const Text(
+                        'Apakah mau keluar dari scan barang?\nPastikan sudah export hasil scan barang.',
                       ),
-                    ),
-                  ),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: exportToExcel,
-                      icon: const Icon(Icons.file_download),
-                      label: const Text('Excel'),
-                    ),
-                  ),
-                  // Expanded(
-                  //   child: ElevatedButton.icon(
-                  //     onPressed: exportToCsv,
-                  //     icon: const Icon(Icons.file_download),
-                  //     label: const Text('Csv'),
-                  //   ),
-                  // ),
-                  const SizedBox(width: 10),
-                  IconButton(
-                    icon: const Icon(Icons.add),
-                    onPressed: _showAddItemDialog,
-                    color: Colors.black,
-                    tooltip: 'Tambah Item',
-                  ),
-                ],
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('Batal'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('Keluar'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+
+                if (exit == true) {
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.switch_camera),
+                onPressed: _switchCamera,
+                tooltip: 'Switch Camera',
+              ),
+              IconButton(
+                icon: const Icon(Icons.flash_on),
+                onPressed: _toggleTorch,
+                tooltip: 'Toggle Flash',
+              ),
+            ],
+          ),
+          body: Container(
+            width: double.infinity,
+            height: double.infinity,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xffFF5F6D), Color(0xffFFC371)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
             ),
-            // Camera preview
-            Container(
-              height: 250,
-              margin: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 20,
-                    spreadRadius: 5,
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: MobileScanner(
-                  controller: controller,
-                  onDetect: _handleBarcode,
-                ),
-              ),
-            ),
-            // Scanned items count
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10.0, vertical: 10),
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Scanned: ${_scannedItems.length}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      'Unsynced: ${_scannedItems.where((item) => item['is_sync'] == 0).length}',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.orange[700],
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // Scanned items list
-            Expanded(
-                child: _scannedItems.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No scanned items yet.\nStart scanning!',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.white,
+            child: Column(
+              children: [
+                // Action buttons row
+                Padding(
+                  padding: const EdgeInsets.all(10.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _syncToMySQL,
+                          icon: const Icon(Icons.save),
+                          label: const Text('To Server'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                         ),
-                      )
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
+                      ),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: exportToExcel,
+                          icon: const Icon(Icons.file_download),
+                          label: const Text('Excel'),
                         ),
-                        itemCount: _scannedItems.length,
-                        itemBuilder: (context, index) {
-                          final item = _scannedItems[index];
+                      ),
+                      // Expanded(
+                      //   child: ElevatedButton.icon(
+                      //     onPressed: exportToCsv,
+                      //     icon: const Icon(Icons.file_download),
+                      //     label: const Text('Csv'),
+                      //   ),
+                      // ),
+                      const SizedBox(width: 10),
+                      IconButton(
+                        icon: const Icon(Icons.add),
+                        onPressed: _showAddItemDialog,
+                        color: Colors.black,
+                        tooltip: 'Tambah Item',
+                      ),
+                    ],
+                  ),
+                ),
+                // Camera preview
+                Container(
+                  height: 250,
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.3),
+                        blurRadius: 20,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: MobileScanner(
+                      controller: controller,
+                      onDetect: _handleBarcode,
+                    ),
+                  ),
+                ),
+                // Scanned items count
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10.0, vertical: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Scanned: ${_scannedItems.length}',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Unsynced: ${_scannedItems.where((item) => item['is_sync'] == 0).length}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.orange[700],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Scanned items list
+                Expanded(
+                    child: _scannedItems.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No scanned items yet.\nStart scanning!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.white,
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                            ),
+                            itemCount: _scannedItems.length,
+                            itemBuilder: (context, index) {
+                              final item = _scannedItems[index];
 
-                          final isSynced = item['is_sync'].toString() == '1';
+                              final isSynced =
+                                  item['is_sync'].toString() == '1';
 
-                          final controller = _getController(
-                            item['id'],
-                            item['stok'].toString(),
-                          );
+                              final controller = _getController(
+                                item['id'],
+                                item['stok'].toString(),
+                              );
 
-                          return Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
+                              return Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(10),
+                                  child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Icon(
-                                        isSynced
-                                            ? Icons.check_circle
-                                            : Icons.pending,
-                                        color: isSynced
-                                            ? Colors.green
-                                            : Colors.orange,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              '${item['kode_item'] ?? 'N/A'}',
-                                              style: const TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 14,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 5),
-                                            Text(
-                                              'Nama: ${item['nama_item'] ?? '-'}',
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 5),
-                                            Text(
-                                              'Stok: ${item['stok'] ?? '0'}',
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.blue,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
                                       Row(
-                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.edit,
-                                              color: Colors.blue,
-                                            ),
-                                            onPressed: () => _editItem(
-                                              item['id'],
-                                              item['kode_item']?.toString() ??
-                                                  '',
-                                              item['nama_item']?.toString() ??
-                                                  '-',
-                                              item['stok']?.toString() ?? '0',
+                                          Icon(
+                                            isSynced
+                                                ? Icons.check_circle
+                                                : Icons.pending,
+                                            color: isSynced
+                                                ? Colors.green
+                                                : Colors.orange,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  '${item['kode_item'] ?? 'N/A'}',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 5),
+                                                Text(
+                                                  'Nama: ${item['nama_item'] ?? '-'}',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 5),
+                                                Text(
+                                                  'Stok: ${item['stok'] ?? '0'}',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.blue,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                          IconButton(
-                                            icon: const Icon(
-                                              Icons.delete,
-                                              color: Colors.red,
-                                            ),
-                                            onPressed: () => _deleteItem(
-                                              item['id'],
-                                            ),
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                icon: const Icon(
+                                                  Icons.edit,
+                                                  color: Colors.blue,
+                                                ),
+                                                onPressed: () => _editItem(
+                                                  item['id'],
+                                                  item['kode_item']
+                                                          ?.toString() ??
+                                                      '',
+                                                  item['nama_item']
+                                                          ?.toString() ??
+                                                      '-',
+                                                  item['stok']?.toString() ??
+                                                      '0',
+                                                ),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(
+                                                  Icons.delete,
+                                                  color: Colors.red,
+                                                ),
+                                                onPressed: () => _deleteItem(
+                                                  item['id'],
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
+
+                                      const SizedBox(height: 10),
+
+                                      // INPUT STOK
+                                      TextField(
+                                        controller: controller,
+                                        keyboardType: TextInputType.number,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Input Jumlah Stok',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                      ),
+
+                                      const SizedBox(height: 10),
+
+                                      // BUTTON SAVE
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: ElevatedButton(
+                                          onPressed: () {
+                                            _saveManualStock(
+                                              item['id'],
+                                              controller.text,
+                                              index,
+                                            );
+                                          },
+                                          child: const Text(
+                                            'SAVE',
+                                          ),
+                                        ),
+                                      ),
                                     ],
                                   ),
-
-                                  const SizedBox(height: 10),
-
-                                  // INPUT STOK
-                                  TextField(
-                                    controller: controller,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Input Jumlah Stok',
-                                      border: OutlineInputBorder(),
-                                      isDense: true,
-                                    ),
-                                  ),
-
-                                  const SizedBox(height: 10),
-
-                                  // BUTTON SAVE
-                                  SizedBox(
-                                    width: double.infinity,
-                                    child: ElevatedButton(
-                                      onPressed: () {
-                                        _saveManualStock(
-                                          item['id'],
-                                          controller.text,
-                                          index,
-                                        );
-                                      },
-                                      child: const Text(
-                                        'SAVE',
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        })),
-          ],
-        ),
-      ),
+                                ),
+                              );
+                            })),
+              ],
+            ),
+          )),
     );
   }
 

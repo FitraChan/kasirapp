@@ -32,7 +32,7 @@ class _CsvImportScreenState extends State<CsvImportScreen> {
       _isLoading = true;
     });
 
-    final items = await KasirHelper().getAllProdukGudang();
+    final items = await KasirHelper().getProdukGudang();
     // Ensure mutable deep copy of maps
     final mutableItems =
         items.map((m) => Map<String, dynamic>.from(m)).toList();

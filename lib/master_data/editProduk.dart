@@ -190,7 +190,6 @@ class _EditProdukState extends State<EditProduk> {
     //   int id = await helper!.createProduk(course);
     int id = await helper!.updateProduk(course);
 
-    //Navigator.of(context).pop();
     Navigator.push(
       context,
       MaterialPageRoute(
